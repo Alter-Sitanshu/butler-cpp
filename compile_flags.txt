@@ -1,0 +1,3 @@
+-I/usr/include/python3.12 
+-I/usr/lib/python3/dist-packages/pybind11/include
+-std=c++17
