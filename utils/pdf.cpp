@@ -1,5 +1,4 @@
 #include "../include/pdf.hpp"
-#include "../include/parser.hpp"
 #include <cassert>
 #include <cstddef>
 #include <cstdio>
@@ -16,8 +15,8 @@ void strip_str(std::string& s) {
     size_t l = 0;
     int r = s.size()-1;
     
-    while (l < s.size() && (s[l] == ' ' || s[l] == '\t')) l++;
-    while (r >= 0 && (s[r] == ' ' || s[r] == '\t')) r--;
+    while (l < s.size() && (s[l] == ' ' || s[l] == '\t' || s[l] == '\n')) l++;
+    while (r >= 0 && (s[r] == ' ' || s[r] == '\t' || s[r] == '\n')) r--;
     
     if (l > r) {
         std::fprintf(stderr, "error string is empty: expected something\n");

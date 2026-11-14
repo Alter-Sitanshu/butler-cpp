@@ -1,13 +1,13 @@
 #include "./include/parser.hpp"
-#include "./include/cache_scrub.hpp"
+#include "./include/repo.hpp"
 #include "./include/pdf.hpp"
+#include "./include/secrets.hpp"
 #include <string>
 #include <string_view>
 
 using namespace std;
 
 int main(int argc, char* argv[]) {
-    
     int N = argc - 1;
     Command root = MakeRootCmd("butler", "Butler is a dynamic CLI assistant that can be tweaked to cater various needs and requirements to automate and help in day to day redundant tasks. Just Plug and Build your custom Butler commands and functions to make it cater to your needs. Do not trust blindly !");
     
@@ -76,6 +76,20 @@ int main(int argc, char* argv[]) {
     ));
     protectCmd.addFlag(Flag<std::string>(
         "perm", "default", false, true, "p", "Specifies the permissions allowed for the protected file"
+    ));
+    
+
+
+    Command secretCmd = Command("secrets", "Scans the repository for potentially exposed SECRETS and hard coded API KEYS."\
+            " By default it scans the staged"\
+            "files. But this can be changed by toggling the --history boolean flag which tells the tool to search for exposed secrets also in the git commit"\
+            "history of the repository",
+            scanSecrets,
+            0
+    );
+    repoCmd.addSubCmd(&secretCmd);
+    secretCmd.addFlag(Flag<bool>(
+        "history", "false", false, true, "", "Scan the git commit history"
     ));
 
 

@@ -1,18 +1,17 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
+#include <fstream>
 #include <linux/limits.h>
 #include <stdexcept>
 #include <string>
 #include <vector>
-#include "../include/cache_scrub.hpp"
-#include "../include/parser.hpp"
+#include "../include/repo.hpp"
 #include <unistd.h>
-#include <sys/types.h>
 #include <sys/wait.h>
 #include <assert.h>
-#include <limits.h>
 
+#define ENV_EXT ".env"
 
 bool acceptConfirmation() {
     std::printf(" Confirm [y/Y/n/N]: ");
@@ -32,10 +31,6 @@ void prune(const Args& args) {
         "/build", "/*/__pycache__", "/__pycache__",  "/node_modules", "/venv", "/env",
         ".cache"
     };
-
-    // atleast one path must be provided
-    assert(paths.size() > 0);
-
 
     bool toConfirm = args.getBool("confirm");
     
@@ -113,6 +108,64 @@ void prune(const Args& args) {
     }
 
 };
+
+// Check for push; use this before the first push to just check that you have done the 
+// absolute basics of precautions before publishing the commits
+void check_env(const Args& args) {
+    
+    std::string env_fname = args.getStr("env_file");
+    assert ((env_fname.size() >= 4 && env_fname.substr(env_fname.size()-4, 4) == ENV_EXT) || "environment file is expected to have .env extension\n");
+
+    std::string cwd;
+    char buffer[PATH_MAX];
+    if (getcwd(buffer, sizeof(buffer)) != nullptr) {
+        cwd.assign(buffer);
+    } else {
+        fprintf(stderr, "error getting the cwd\n");
+        throw std::runtime_error("error getting cwd\n");
+    }
+
+    std::fstream f_ignore(cwd + "/.gitignore", std::ios::in | std::ios::app);
+    assert (f_ignore.is_open() || "file could not be opened\n");
+
+    std::string line;
+
+    bool has_ignored_env = false;
+    while (std::getline(f_ignore, line)) {
+        size_t L = line.size();
+        if (L >= 4 && line.substr(L - 4, 4) == ENV_EXT) {
+            has_ignored_env = true;
+        }
+    };
+
+    // assert the reading of the entire file for moving forward
+    assert (f_ignore.eof() || "error reading the .gitignore file. did not reach EOF");
+
+    if (!has_ignored_env) {
+        // append the .env ignoring tag in the .gitignore file
+        f_ignore << "*.env";
+    }
+
+    // create a precaution file *.env.example
+    std::string env_path(cwd + env_fname);
+    std::fstream envf(env_path, std::ios::out);
+    std::fstream eg_envf(env_path+".example", std::ios::out);
+    while (getline(envf, line)) {
+        size_t i = line.find_first_of('=');
+        // By default i will just assume that all the env variables are strings and thus replace them with just quotes
+        // Prompt the user to check the env example
+        eg_envf << line.substr(0, i+1) << "=\"\"";
+        std::printf("created: %s.example . Check after operations\n", env_path.c_str());
+    }
+
+    assert (envf.eof() || "error reading the env file. did not reach EOF\n");
+
+    // defer the close of the file input stream
+    f_ignore.close();
+    envf.close();
+    eg_envf.close();
+};
+
 
 
 
