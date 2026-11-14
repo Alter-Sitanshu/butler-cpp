@@ -1,14 +1,15 @@
 #include <cstddef>
+#include <cctype>
 #include <cstdio>
 #include <string>
 #include <vector>
+#include <set>
 #include <iostream>
 #include <fstream>
 #include <filesystem>
 #include <sstream>
 
-#include "../include/secrets.hpp"
-                        
+#include "../include/secrets.hpp"                        
 
 const std::vector<SecretRule>& getSecretRules() {
     static const std::vector<SecretRule> rules = {
@@ -91,7 +92,8 @@ std::vector<SecretFinding> scanContent(const std::filesystem::path& source, std:
                 findings.push_back({
                     source.string(),
                     rule.name,
-                    lineNumber
+                    lineNumber,
+                    ""
                 });
             }
         }
@@ -102,17 +104,52 @@ std::vector<SecretFinding> scanContent(const std::filesystem::path& source, std:
 
 }
 
-std::vector<SecretFinding> scanFile_H(const std::string& hash, const std::filesystem::path& filepath) {
-    std::string gitRef = hash + ":" + filepath.generic_string();
-    std::string cmd = "git show " + shellQuote(gitRef);
+std::vector<SecretFinding> scanFile_H(
+    const std::string& commit,
+    const std::string& oid,
+    const std::filesystem::path& filepath
+) {
+    // Validate Git object ID before using it in a shell command.
+    if (oid.size() != 40 && oid.size() != 64)
+        throw std::runtime_error("Invalid Git object ID");
 
-    try {
-        std::string file_content = executeGit(cmd.c_str());
-        std::istringstream contentStream(file_content);
-        return scanContent(filepath, contentStream);
-    } catch (const std::exception&) {
+    for (char ch : oid) {
+        if (!std::isxdigit(static_cast<unsigned char>(ch)))
+            throw std::runtime_error("Invalid Git object ID");
+    }
+
+    std::string sh_oid = shellQuote(oid);
+    std::string osize_cmd = "git cat-file -s " + sh_oid;
+    char* end;
+    errno = 0;
+
+    std::string sizeStr = executeGit(osize_cmd.c_str());
+    strip_str(sizeStr);
+    long long osize = std::strtoll(sizeStr.c_str(), &end, 10);
+
+    if (errno == ERANGE || end == sizeStr.c_str() || *end != '\0') {
+        std::cout << sizeStr.size() << '\n';
+        throw std::runtime_error("Invalid blob size");
+    }
+    if (osize > MAX_BLOB_SIZE) {
+        std::printf("Skipped file %s:%s\n. Too large > 5MB", commit.c_str(), filepath.c_str());
         return {};
     }
+
+    std::string cmd = "git cat-file blob " + sh_oid;
+
+    std::string content = executeGit(cmd.c_str());
+
+    std::istringstream contentStream(content);
+
+    auto findings = scanContent(filepath, contentStream);
+
+    // Attach the commit where this version was encountered.
+    for (auto& finding : findings) {
+        finding.commit = commit;
+    }
+
+    return findings;
 }
 
 
@@ -190,26 +227,58 @@ void scanHistory() {
         }
     }
 
+    std::set<std::string> seenBlobs;
     std::vector<SecretFinding> findings;
 
     for (const auto& commit : hashv) {
-        std::string treeOutput = executeGit(("git ls-tree -r --name-only " + commit).c_str());
-        std::istringstream treeStream(treeOutput);
-        std::string filePath;
+        std::string treeOutput = executeGit(("git ls-tree -r -z " + commit).c_str());
+        size_t position = 0;
 
-        while (std::getline(treeStream, filePath)) {
+        while (position < treeOutput.size()) {
+            size_t end = treeOutput.find('\0', position);
+            if (end == std::string::npos) {
+                break;
+            }
+
+            std::string entry = treeOutput.substr(position, end - position);
+            position = end + 1;
+
+            size_t tabPos = entry.find('\t');
+            if (tabPos == std::string::npos) {
+                continue;
+            }
+
+            // the info is just separated by a tab character
+            std::string metadata = entry.substr(0, tabPos);     // contains the codes, type, and hash 
+            std::string filePath = entry.substr(tabPos + 1);    // the relative filepath from the --top-level
+
             if (filePath.empty()) {
                 continue;
             }
 
-            auto fileFindings = scanFile_H(commit, filePath);
-            for (auto& finding : fileFindings) {
-                findings.push_back({
-                    commit + ":" + finding.filepath,
-                    finding.rule,
-                    finding.line
-                });
+            // the metadata format is : code_type_id
+            // so just find the last occurance of space and the substring after that is the object id
+            size_t oidPos = metadata.rfind(' ');
+            if (oidPos == std::string::npos) {
+                continue;
             }
+
+            std::string objectId = metadata.substr(oidPos + 1);
+            if (objectId.empty()) {
+                continue;
+            }
+
+            if (!seenBlobs.insert(objectId).second) {
+                // i have seen this blob skip scanning this
+                continue;
+            }
+
+            auto fileFindings = scanFile_H(commit, objectId, filePath);
+            findings.insert(
+                findings.end(),
+                fileFindings.begin(),
+                fileFindings.end()
+            );
         }
     }
 
@@ -221,7 +290,7 @@ void scanHistory() {
     for (const auto& finding : findings) {
         std::cout
             << "[!] " << finding.rule
-            << " found in " << finding.filepath
+            << " found in " << finding.commit << ": " << finding.filepath
             << ":" << finding.line << '\n';
     }
 

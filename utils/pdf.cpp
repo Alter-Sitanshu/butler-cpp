@@ -11,22 +11,6 @@
 
 #include <podofo/podofo.h>
 
-void strip_str(std::string& s) {
-    size_t l = 0;
-    int r = s.size()-1;
-    
-    while (l < s.size() && (s[l] == ' ' || s[l] == '\t' || s[l] == '\n')) l++;
-    while (r >= 0 && (s[r] == ' ' || s[r] == '\t' || s[r] == '\n')) r--;
-    
-    if (l > r) {
-        std::fprintf(stderr, "error string is empty: expected something\n");
-        throw std::invalid_argument("empty string received\n");
-    }
-
-    s = s.substr(l, r-l+1);
-};
-
-
 void mergePDF(const Args& args) {
 
     bool verbose = args.getBool("verbose");

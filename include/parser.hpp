@@ -25,6 +25,27 @@
 #define MAX_HELPER_FMT_LIMIT 60
 #define SP_C_POS "--"   // special character for positional arguments
 
+inline void strip_str(std::string& s) {
+    
+    const size_t n = s.size();
+    if (n == 0) {
+        return;
+    }
+    
+    size_t l = 0;
+    size_t r = n-1;
+    
+    while (l < s.size() && (s[l] == ' ' || s[l] == '\t' || s[l] == '\n')) l++;
+    while (r > l && (s[r] == ' ' || s[r] == '\t' || s[r] == '\n')) r--;
+    
+    if (l > r) {
+        std::fprintf(stderr, "error string is empty: expected something\n");
+        throw std::invalid_argument("empty string received\n");
+    }
+
+    s = s.substr(l, r-l+1);
+}
+
 struct ParserError : public std::exception {
 private:
     std::string message;
